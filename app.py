@@ -9,7 +9,8 @@ from dotenv import load_dotenv
 from pypdf import PdfReader
 from docx import Document
 from openpyxl import load_workbook
-
+from google import genai
+from google.genai import types
 load_dotenv()
 
 st.set_page_config(
@@ -116,15 +117,14 @@ def extract_text(uploaded_file):
 # AI CONFIGURATION
 # -------------------------
 
-def get_openai_client():
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+def get_gemini_client():
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
 
     if not api_key:
         return None
 
     try:
-        from openai import OpenAI
-        return OpenAI(api_key=api_key)
+        return genai.Client(api_key=api_key)
     except Exception:
         return None
 
@@ -150,12 +150,12 @@ def build_context(documents, selected_names=None):
 
 
 def ask_ai(prompt, context, system_instruction):
-    client = get_openai_client()
+    client = get_gemini_client()
 
     if client is None:
         return None, (
-            "AI is not configured. Add OPENAI_API_KEY to your .env "
-            "file and restart the application."
+            "Gemini AI is not configured. Add GEMINI_API_KEY "
+            "to your .env file and restart the application."
         )
 
     if not context.strip():
@@ -165,28 +165,29 @@ def ask_ai(prompt, context, system_instruction):
         )
 
     try:
-        response = client.chat.completions.create(
-            model=os.getenv(
-                "OPENAI_MODEL",
-                "gpt-4.1-mini",
-            ),
-            temperature=0.1,
-            messages=[
-                {
-                    "role": "system",
-                    "content": system_instruction,
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"DOCUMENT EVIDENCE:\n{context}\n\n"
-                        f"REQUEST:\n{prompt}"
-                    ),
-                },
-            ],
+        model = os.getenv(
+            "GEMINI_MODEL",
+            "gemini-3.5-flash-lite",
         )
 
-        return response.choices[0].message.content, None
+        response = client.models.generate_content(
+            model=model,
+            contents=(
+                f"DOCUMENT EVIDENCE:\n{context}\n\n"
+                f"REQUEST:\n{prompt}"
+            ),
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=0.1,
+            ),
+        )
+
+        answer = response.text
+
+        if not answer:
+            return None, "Gemini returned an empty response."
+
+        return answer, None
 
     except Exception as exc:
         return None, f"AI request failed: {exc}"
@@ -218,36 +219,48 @@ with st.sidebar:
 
     st.divider()
 
-    if os.getenv("OPENAI_API_KEY", "").strip():
-        st.success("AI is configured")
+    if os.getenv("GEMINI_API_KEY", "").strip():
+        st.success("Gemini AI is configured")
     else:
         st.info(
-            "AI is not configured. Document upload and text "
-            "extraction can still work."
-        )
+        "Gemini AI is not configured. Document upload and "
+        "text extraction can still work."
+    )
 
+def clear_uploaded_documents():
+    st.session_state.documents = {}
+    st.session_state.pop("last_answer", None)
+    st.session_state.pop("last_question", None)
+    st.session_state.pop("last_review", None)
+    st.session_state.pop("last_review_areas", None)
+    st.session_state.pop("review_docs", None)
+    st.session_state.document_uploader = None
 
+    # Change the uploader key to reset its selection.
+    st.session_state["uploader_version"] = (
+        st.session_state.get("uploader_version", 0) + 1
+    )
 # -------------------------
 # FILE UPLOAD
 # -------------------------
+
+st.subheader("Upload Compliance Documents")
 
 upload_col, privacy_col = st.columns([2, 1])
 
 with upload_col:
     uploaded_files = st.file_uploader(
-        "Upload compliance documents",
+        "Choose compliance documents",
         type=SUPPORTED_TYPES,
         accept_multiple_files=True,
-        help="Files are processed during this app session.",
+        help="Upload PDF, DOCX, or XLSX files.",
+        key=f"document_uploader_{st.session_state.get('uploader_version', 0)}",
     )
 
 with privacy_col:
-    st.markdown("**Privacy note**")
-
-    st.write(
-        "Files remain in the app session unless extracted text "
-        "is sent to an AI provider. Use non-sensitive demo files."
-    )
+    st.markdown("### Supported files")
+    st.write("PDF, DOCX, XLSX, JPG, JPEG")
+    st.info("Maximum file size: 20 MB per file.")
 
 
 if uploaded_files:
@@ -407,9 +420,11 @@ with tab_docs:
                     "The file may be scanned or empty."
                 )
 
-        if st.button("Clear all uploaded documents"):
-            st.session_state.documents = {}
-            st.rerun()
+        
+        st.button(
+            "Clear all uploaded documents",
+            on_click=clear_uploaded_documents,
+        )
 
 
 # -------------------------
