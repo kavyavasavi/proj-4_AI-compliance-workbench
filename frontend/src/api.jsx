@@ -1,3 +1,4 @@
+
 import axios from "axios";
 
 const api = axios.create({
@@ -5,10 +6,44 @@ const api = axios.create({
   timeout: 120000,
 });
 
+// Check backend connection
 export async function checkBackend() {
   const response = await api.get("/health");
   return response.data;
 }
+
+// --------------------
+// SESSION MANAGEMENT
+// --------------------
+
+export async function createSession(title = null) {
+  const response = await api.post("/sessions", { title });
+  return response.data;
+}
+
+export async function getSessions() {
+  const response = await api.get("/sessions");
+  return response.data;
+}
+
+export async function getSession(sessionId) {
+  const response = await api.get(`/sessions/${sessionId}`);
+  return response.data;
+}
+
+export async function renameSession(sessionId, title) {
+  const response = await api.patch(`/sessions/${sessionId}`, { title });
+  return response.data;
+}
+
+export async function deleteSession(sessionId) {
+  const response = await api.delete(`/sessions/${sessionId}`);
+  return response.data;
+}
+
+// --------------------
+// DOCUMENT MANAGEMENT
+// --------------------
 
 export async function uploadDocuments(sessionId, files) {
   const formData = new FormData();
@@ -27,7 +62,15 @@ export async function getDocuments(sessionId) {
   return response.data;
 }
 
-export async function askDocuments(sessionId, question, documentNames = null) {
+// --------------------
+// AI QUESTION & ANSWER
+// --------------------
+
+export async function askDocuments(
+  sessionId,
+  question,
+  documentNames = null
+) {
   const response = await api.post("/ask", {
     session_id: sessionId,
     question,
@@ -36,6 +79,10 @@ export async function askDocuments(sessionId, question, documentNames = null) {
 
   return response.data;
 }
+
+// --------------------
+// COMPLIANCE REVIEW
+// --------------------
 
 export async function runComplianceReview(
   sessionId,
@@ -50,6 +97,10 @@ export async function runComplianceReview(
 
   return response.data;
 }
+
+// --------------------
+// REPORT EXPORT
+// --------------------
 
 export async function exportReport(sessionId) {
   const response = await api.get(`/report/${sessionId}`);

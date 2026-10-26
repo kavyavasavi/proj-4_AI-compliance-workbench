@@ -651,3 +651,128 @@ a { color: inherit; text-decoration: none; }
     padding: 14px;
   }
 }
+
+/* Consistent dark-theme styling for secondary buttons */
+button.secondary-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 13px;
+  margin: 5px 8px 5px 0;
+
+  background: rgba(15, 29, 53, 0.75);
+  color: #a9c9f5;
+  border: 1px solid rgba(92, 151, 230, 0.28);
+  border-radius: 8px;
+
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+
+button.secondary-link:hover:not(:disabled) {
+  background: rgba(36, 83, 143, 0.35);
+  color: #e3f1ff;
+  border-color: rgba(92, 174, 255, 0.65);
+}
+
+button.secondary-link:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Session history in the sidebar */
+.session-history {
+  margin-top: 24px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.session-history-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  color: var(--muted, #9297a5);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+}
+
+.new-session-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.new-session-button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.session-item span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+
+.session-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.session-item.active {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.session-empty {
+  padding: 0 8px;
+  color: var(--muted, #9297a5);
+  font-size: 12px;
+}
+
+.session-error {
+  padding: 0 8px;
+  color: #ff8f8f;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
