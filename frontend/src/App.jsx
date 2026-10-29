@@ -1,7 +1,5 @@
 
-import { useState, useRef, useEffect } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
-import { Float, Stars, Sparkles } from "@react-three/drei";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import {
   ShieldCheck,
   ArrowUpRight,
@@ -19,10 +17,16 @@ import {
   Download,
   Send,
   RefreshCw,
+  Plus,
+  MessageSquare
 } from "lucide-react";
-import * as THREE from "three";
-import {
+import api, {
   checkBackend,
+  createSession,
+  getSessions,
+  getSession,
+  renameSession,
+  deleteSession,
   uploadDocuments,
   getDocuments,
   askDocuments,
@@ -31,7 +35,8 @@ import {
 } from "./api";
 import "./App.css";
 
-const SESSION_ID = "complyai-local-demo";
+const Scene = lazy(() => import("./HeroScene"));
+// const SESSION_ID = "complyai-local-demo";
 
 const REVIEW_AREAS = [
   "Access control and user permissions",
@@ -44,133 +49,72 @@ const REVIEW_AREAS = [
   "Monitoring, logging, and audit evidence",
 ];
 
-// --------------------------------------------------
-// 3D HOLOGRAPHIC CORE
-// --------------------------------------------------
 
-function HolographicCore() {
-  const core = useRef();
-  const ring1 = useRef();
-  const ring2 = useRef();
-
-  useFrame((state, delta) => {
-    if (core.current) {
-      core.current.rotation.y += delta * 0.18;
-      core.current.rotation.x =
-        Math.sin(state.clock.elapsedTime * 0.3) * 0.12;
+function renderInlineMarkdown(text, keyPrefix = "text") {
+  const parts = String(text ?? "").split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+  return parts.map((part, index) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={`${keyPrefix}-${index}`}>{part.slice(2, -2)}</strong>;
     }
-
-    if (ring1.current) {
-      ring1.current.rotation.x += delta * 0.12;
-      ring1.current.rotation.y += delta * 0.2;
+    if (part.startsWith("`") && part.endsWith("`")) {
+      return <code key={`${keyPrefix}-${index}`}>{part.slice(1, -1)}</code>;
     }
-
-    if (ring2.current) {
-      ring2.current.rotation.x -= delta * 0.16;
-      ring2.current.rotation.z += delta * 0.12;
-    }
+    return part;
   });
-
-  return (
-    <group>
-      <Float
-        speed={1.5}
-        rotationIntensity={0.18}
-        floatIntensity={0.45}
-      >
-        <mesh ref={core}>
-          <icosahedronGeometry args={[1.12, 3]} />
-          <meshPhysicalMaterial
-            color="#168cff"
-            emissive="#063eac"
-            emissiveIntensity={1.3}
-            metalness={0.35}
-            roughness={0.17}
-            transmission={0.2}
-            thickness={1.4}
-            clearcoat={1}
-            clearcoatRoughness={0.08}
-            flatShading
-          />
-        </mesh>
-
-        <mesh scale={0.77}>
-          <icosahedronGeometry args={[1.12, 2]} />
-          <meshBasicMaterial
-            color="#80f4ff"
-            wireframe
-            transparent
-            opacity={0.48}
-          />
-        </mesh>
-      </Float>
-
-      <mesh ref={ring1} rotation={[0.8, 0.25, 0.3]}>
-        <torusGeometry args={[1.62, 0.009, 12, 180]} />
-        <meshBasicMaterial color="#4be7ff" />
-      </mesh>
-
-      <mesh ref={ring2} rotation={[1.3, 0.8, 0.1]}>
-        <torusGeometry args={[1.85, 0.006, 12, 180]} />
-        <meshBasicMaterial
-          color="#3478ff"
-          transparent
-          opacity={0.8}
-        />
-      </mesh>
-
-      <mesh position={[1.2, 0.8, 0.5]}>
-        <sphereGeometry args={[0.065, 20, 20]} />
-        <meshBasicMaterial color="#b9fbff" />
-      </mesh>
-
-      <mesh position={[-1.5, -0.4, 0.4]}>
-        <sphereGeometry args={[0.045, 20, 20]} />
-        <meshBasicMaterial color="#66aaff" />
-      </mesh>
-
-      <pointLight color="#087cff" intensity={16} distance={8} />
-      <pointLight
-        position={[2, 2, 2]}
-        color="#54eaff"
-        intensity={10}
-        distance={6}
-      />
-    </group>
-  );
 }
 
-function Scene() {
-  return (
-    <Canvas
-      camera={{ position: [0, 0, 5.5], fov: 42 }}
-      dpr={[1, 1.5]}
-      gl={{ antialias: true, alpha: true }}
-    >
-      <ambientLight intensity={1.2} />
-      <pointLight
-        position={[-3, 2, 3]}
-        intensity={3}
-        color="#155eef"
-      />
-      <Stars
-        radius={65}
-        depth={35}
-        count={1100}
-        factor={2}
-        fade
-        speed={0.6}
-      />
-      <Sparkles
-        count={90}
-        scale={5}
-        size={2.5}
-        speed={0.3}
-        color="#71dfff"
-      />
-      <HolographicCore />
-    </Canvas>
-  );
+function FormattedResponse({ text }) {
+  const lines = String(text ?? "").replace(/\r\n/g, "\n").split("\n");
+  const blocks = [];
+  let bulletItems = [];
+
+  const flushBullets = () => {
+    if (bulletItems.length) {
+      blocks.push(
+        <ul key={`list-${blocks.length}`}>
+          {bulletItems.map((item, index) => (
+            <li key={`item-${index}`}>{renderInlineMarkdown(item, `bullet-${blocks.length}-${index}`)}</li>
+          ))}
+        </ul>
+      );
+      bulletItems = [];
+    }
+  };
+
+  lines.forEach((rawLine, index) => {
+    const line = rawLine.trim();
+    if (!line) {
+      flushBullets();
+      return;
+    }
+
+    const bulletMatch = line.match(/^(?:[-*•]|\d+[.)])\s+(.+)$/);
+    if (bulletMatch) {
+      bulletItems.push(bulletMatch[1]);
+      return;
+    }
+
+    flushBullets();
+
+    const headingMatch = line.match(/^\*\*(.+?)\*\*:?\s*$/) ||
+      line.match(/^(#{1,3})\s+(.+)$/);
+
+    if (headingMatch) {
+      const headingText = headingMatch[2] || headingMatch[1];
+      blocks.push(
+        <h4 key={`heading-${index}`}>{renderInlineMarkdown(headingText, `heading-${index}`)}</h4>
+      );
+      return;
+    }
+
+    blocks.push(
+      <p key={`paragraph-${index}`}>{renderInlineMarkdown(line, `paragraph-${index}`)}</p>
+    );
+  });
+
+  flushBullets();
+
+  return <div className="formatted-response">{blocks}</div>;
 }
 
 // --------------------------------------------------
@@ -178,7 +122,14 @@ function Scene() {
 // --------------------------------------------------
 
 function Dashboard({ onBack }) {
+
   const [activeTab, setActiveTab] = useState("Overview");
+  const initializationStarted = useRef(false);
+  const [activeSessionId, setActiveSessionId] = useState(null);
+  const [savedSessions, setSavedSessions] = useState([]);
+  const [sessionHistory, setSessionHistory] = useState([]);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [sessionError, setSessionError] = useState("");
   const [serverDocuments, setServerDocuments] = useState([]);
   const [uploadStatus, setUploadStatus] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -186,7 +137,6 @@ function Dashboard({ onBack }) {
   const [backendOnline, setBackendOnline] = useState(false);
 
   const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState("");
   const [asking, setAsking] = useState(false);
   const [askError, setAskError] = useState("");
   const [selectedQuestionDocs, setSelectedQuestionDocs] = useState([]);
@@ -211,118 +161,250 @@ function Dashboard({ onBack }) {
   const readableDocuments = serverDocuments.filter(
     (doc) => doc.has_text
   );
-
-  async function refreshDocuments() {
-    try {
-      const result = await getDocuments(SESSION_ID);
-      const docs = result.documents || [];
-
-      setServerDocuments(docs);
-
-      setSelectedQuestionDocs((previous) =>
-        previous.length
-          ? previous.filter((name) =>
-              docs.some((doc) => doc.name === name && doc.has_text)
-            )
-          : docs.filter((doc) => doc.has_text).map((doc) => doc.name)
-      );
-
-      setSelectedReviewDocs((previous) =>
-        previous.length
-          ? previous.filter((name) =>
-              docs.some((doc) => doc.name === name && doc.has_text)
-            )
-          : docs.filter((doc) => doc.has_text).map((doc) => doc.name)
-      );
-
-      return docs;
-    } catch {
-      setBackendOnline(false);
-      return [];
-    }
+async function refreshDocuments(sessionId = activeSessionId) {
+  if (!sessionId) {
+    setServerDocuments([]);
+    return [];
   }
 
-  useEffect(() => {
-    checkBackend()
-      .then(() => {
-        setBackendOnline(true);
-        refreshDocuments();
-      })
-      .catch(() => setBackendOnline(false));
-  }, []);
+  try {
+    const result = await getDocuments(sessionId);
+    const docs = result.documents || [];
 
-  async function handleFileChange(event) {
-    const selectedFiles = Array.from(event.target.files || []);
+    setServerDocuments(docs);
 
-    if (!selectedFiles.length) return;
+    setSelectedQuestionDocs((previous) =>
+      previous.length
+        ? previous.filter((name) =>
+            docs.some((doc) => doc.name === name && doc.has_text)
+          )
+        : docs.filter((doc) => doc.has_text).map((doc) => doc.name)
+    );
 
-    setUploading(true);
-    setUploadStatus("Uploading and extracting document text...");
-    setUploadError("");
+    setSelectedReviewDocs((previous) =>
+      previous.length
+        ? previous.filter((name) =>
+            docs.some((doc) => doc.name === name && doc.has_text)
+          )
+        : docs.filter((doc) => doc.has_text).map((doc) => doc.name)
+    );
 
+    return docs;
+  } catch (error) {
+    setBackendOnline(false);
+    return [];
+  }
+}
+async function openExistingSession(sessionId) {
+  try {
+    setSessionError("");
+
+    const result = await getSession(sessionId);
+
+    setActiveSessionId(sessionId);
+
+    const history = result.history || [];
+    setSessionHistory(history);
+
+    setReview(
+      [...history]
+        .reverse()
+        .find((item) => item.kind === "review")
+        ?.payload?.review || ""
+    );
+
+    setQuestion("");
+    // setReview("");
+
+    await refreshDocuments(sessionId);
+  } catch (error) {
+    setSessionError("Could not open this session. Please try again.");
+  }
+}
+
+async function handleNewSession() {
+  try {
+    setSessionError("");
+
+    const newSession = await createSession();
+
+    setActiveSessionId(newSession.id);
+
+    setSavedSessions((previous) => [
+      newSession,
+      ...previous.filter(
+        (session) => session.id !== newSession.id
+      ),
+    ]);
+
+    setSessionHistory([]);
+    setServerDocuments([]);
+    setQuestion("");
+    setReview("");
+
+    setSelectedQuestionDocs([]);
+    setSelectedReviewDocs([]);
+
+    setActiveTab("Overview");
+  } catch (error) {
+    setSessionError("Could not create a new session. Please try again.");
+  }
+}
+
+useEffect(() => {
+  if (initializationStarted.current) return;
+  initializationStarted.current = true;
+
+  async function initializeWorkspace() {
     try {
-      const result = await uploadDocuments(SESSION_ID, selectedFiles);
-      const results = result.documents || [];
-      const successful = results.filter(
-        (item) => item.status === "success"
-      );
-      const failed = results.filter(
-        (item) => item.status !== "success"
-      );
-
-      setUploadStatus(
-        `${successful.length} of ${results.length} file(s) uploaded successfully.`
-      );
-
-      if (failed.length) {
-        setUploadError(
-          failed
-            .map((item) => `${item.filename}: ${item.message}`)
-            .join("\n")
-        );
-      }
-
-      await refreshDocuments();
+      await checkBackend();
       setBackendOnline(true);
+
+      setSessionsLoading(true);
+      setSessionError("");
+
+      const result = await getSessions();
+      const sessions = result.sessions || [];
+
+      setSavedSessions(sessions);
+
+      if (sessions.length > 0) {
+        // Reopen the most recently updated session.
+        const latestSession = sessions[0];
+        const sessionData = await getSession(latestSession.id);
+
+        setActiveSessionId(latestSession.id);
+        setSessionHistory(sessionData.history || []);
+        setServerDocuments(sessionData.documents || []);
+
+        const latestReview = [...(sessionData.history || [])]
+          .reverse()
+          .find((item) => item.kind === "review");
+
+        setReview(latestReview?.payload?.review || "");
+      } else {
+        // Create a session only if none exist.
+        const newSession = await createSession();
+
+        setActiveSessionId(newSession.id);
+        setSavedSessions([newSession]);
+        setSessionHistory([]);
+        setServerDocuments([]);
+      }
     } catch (error) {
-      setUploadStatus("");
-      setUploadError(
-        error.response?.data?.detail ||
-          "Upload failed. Check whether the Python backend is running."
+      setBackendOnline(false);
+      setSessionError(
+        "Could not load sessions. Please check that the backend is running."
       );
     } finally {
-      setUploading(false);
-      event.target.value = "";
+      setSessionsLoading(false);
     }
   }
 
+  initializeWorkspace();
+}, []);
+
+
+async function handleFileChange(event) {
+  const selectedFiles = Array.from(event.target.files || []);
+
+  if (!selectedFiles.length) return;
+
+  setUploading(true);
+  setUploadStatus("Uploading and checking for duplicates...");
+  setUploadError("");
+
+  try {
+    const result = await uploadDocuments(activeSessionId, selectedFiles);
+    const results = result.documents || [];
+
+    const successful = results.filter(
+      (item) => item.status === "success"
+    );
+
+    const duplicates = results.filter(
+      (item) => item.status === "duplicate"
+    );
+
+    const failed = results.filter(
+      (item) =>
+        item.status !== "success" && item.status !== "duplicate"
+    );
+
+    setUploadStatus(
+      `${successful.length} uploaded, ${duplicates.length} duplicate(s), ${failed.length} failed.`
+    );
+
+    if (duplicates.length || failed.length) {
+      setUploadError(
+        [...duplicates, ...failed]
+          .map((item) => `${item.filename}: ${item.message}`)
+          .join("\n")
+      );
+    }
+
+    await refreshDocuments(activeSessionId);
+
+    const updatedSessions = await getSessions();
+    setSavedSessions(updatedSessions.sessions || []);
+
+    setBackendOnline(true);
+  } catch (error) {
+    setUploadStatus("");
+    setUploadError(
+      error.response?.data?.detail ||
+        "Upload failed. Check whether the Python backend is running."
+    );
+  } finally {
+    setUploading(false);
+    event.target.value = "";
+  }
+}
+
+
   async function handleAsk() {
-    if (!question.trim()) {
+    const submittedQuestion = question.trim();
+
+    if (!submittedQuestion) {
       setAskError("Enter a question first.");
       return;
     }
 
-    if (!readableDocuments.length) {
-      setAskError("Upload a document with extractable text first.");
+    if (!activeSessionId) {
+      setAskError("A workspace session is not ready yet. Please try again.");
       return;
     }
 
     setAsking(true);
     setAskError("");
-    setAnswer("");
 
     try {
+      const documentNames = selectedQuestionDocs.filter((name) =>
+        readableDocuments.some((doc) => doc.name === name)
+      );
       const result = await askDocuments(
-        SESSION_ID,
-        question,
-        selectedQuestionDocs
+        activeSessionId,
+        submittedQuestion,
+        documentNames
       );
 
-      setAnswer(result.answer);
+      const historyItem = {
+        id: result.id,
+        kind: "qa",
+        created_at: result.created_at,
+        payload: {
+          question: result.question ?? submittedQuestion,
+          answer: result.answer,
+          document_names: result.document_names ?? documentNames,
+        },
+      };
+
+      setSessionHistory((previous) => [...previous, historyItem]);
+      setQuestion("");
     } catch (error) {
       setAskError(
         error.response?.data?.detail ||
-          "The question could not be processed."
+          "The question could not be processed. Check the backend terminal for details."
       );
     } finally {
       setAsking(false);
@@ -345,13 +427,28 @@ function Dashboard({ onBack }) {
     setReview("");
 
     try {
-      const result = await runComplianceReview(
-        SESSION_ID,
+    const result = await runComplianceReview(
+        activeSessionId,
         selectedReviewAreas,
         selectedReviewDocs
       );
 
       setReview(result.review);
+setSessionHistory((previous) => [
+  ...previous,
+  {
+    id: result.id,
+    kind: "review",
+    created_at: result.created_at,
+    payload: {
+      review: result.review,
+      review_areas: selectedReviewAreas,
+      document_names: selectedReviewDocs,
+      disclaimer:
+        "Preliminary AI findings require human verification and are not legal advice.",
+    },
+  },
+]);
       setActiveTab("Findings");
     } catch (error) {
       setReviewError(
@@ -367,7 +464,7 @@ function Dashboard({ onBack }) {
     setReportStatus("");
 
     try {
-      const report = await exportReport(SESSION_ID);
+      const report = await exportReport(activeSessionId);
       const blob = new Blob(
         [JSON.stringify(report, null, 2)],
         { type: "application/json" }
@@ -388,29 +485,29 @@ function Dashboard({ onBack }) {
     }
   }
 
-  async function handleClearDocuments() {
-    if (!window.confirm("Clear all documents in this demo session?")) {
-      return;
-    }
 
-    try {
-      const { default: api } = await import("./api");
-      await api.delete(`/documents/${SESSION_ID}`);
-
-      setServerDocuments([]);
-      setSelectedQuestionDocs([]);
-      setSelectedReviewDocs([]);
-      setAnswer("");
-      setReview("");
-      setUploadStatus("All session documents cleared.");
-      setUploadError("");
-    } catch (error) {
-      setUploadError(
-        error.response?.data?.detail ||
-          "Could not clear the session documents."
-      );
-    }
+async function handleClearDocuments() {
+  if (!window.confirm("Clear all documents in this demo session?")) {
+    return;
   }
+
+  try {
+    await api.delete(`/documents/${activeSessionId}`);
+
+    setServerDocuments([]);
+    setSelectedQuestionDocs([]);
+    setSelectedReviewDocs([]);
+    setReview("");
+    setUploadStatus("All session documents cleared.");
+    setUploadError("");
+  } catch (error) {
+    setUploadError(
+      error.response?.data?.detail ||
+        "Could not clear the session documents."
+    );
+  }
+}
+
 
   function toggleItem(item, selected, setSelected) {
     setSelected((previous) =>
@@ -445,6 +542,50 @@ function Dashboard({ onBack }) {
             )}
           </button>
         ))}
+              <div className="session-history">
+          <div className="session-history-heading">
+            <span>YOUR SESSIONS</span>
+            <button
+              type="button"
+              className="new-session-button"
+              onClick={handleNewSession}
+              title="Start a new session"
+            >
+              <Plus size={16} />
+            </button>
+          </div>
+
+          {sessionsLoading ? (
+            <p className="session-empty">Loading sessions...</p>
+          ) : savedSessions.length === 0 ? (
+            <p className="session-empty">No previous sessions</p>
+          ) : (
+            <div className="session-list">
+              {savedSessions.map((session) => (
+                <button
+                  key={session.id}
+                  type="button"
+                  className={`session-item ${
+                    activeSessionId === session.id ? "active" : ""
+                  }`}
+                  onClick={() => openExistingSession(session.id)}
+                  title={session.title || "Untitled session"}
+                >
+                  <MessageSquare size={16} />
+                  <span>
+                    {session.title || "New session"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {sessionError && (
+            <p className="session-error" role="alert">
+              {sessionError}
+            </p>
+          )}
+        </div>
 
         <div className="sidebar-bottom">
           <div className="secure-card">
@@ -504,7 +645,7 @@ function Dashboard({ onBack }) {
                 },
                 {
                   label: "Potential gaps",
-                  value: "—",
+                  value: "Not parsed",
                   icon: Activity,
                 },
               ].map(({ label, value, icon: Icon }) => (
@@ -665,71 +806,132 @@ function Dashboard({ onBack }) {
             <div className="eyebrow">GEMINI-POWERED QUESTION ANSWERING</div>
             <h2>Ask your evidence</h2>
             <p className="muted">
-              Ask questions about uploaded documents. Answers depend on
-              extracted document text and may require human verification.
+              Ask about your selected documents or start with a general question.
+              Evidence-based answers should always be checked against the source.
             </p>
 
-<div className="question-field">
-  <label className="field-label" htmlFor="evidence-question">
-    Your question
-  </label>
-
-              <textarea
-                id="evidence-question"
-                value={question}
-                onChange={(event) => setQuestion(event.target.value)}
-                placeholder="Example: What does the policy say about incident reporting?"
-                rows={4}
-              />
-            </div>
-
-            <div className="selection-list">
-              <strong>Select evidence documents</strong>
-              {readableDocuments.length === 0 && (
-                <p className="muted">Upload readable documents first.</p>
-              )}
-
-              {readableDocuments.map((doc) => (
-                <label key={doc.name} className="selection-item">
-                  <input
-                    type="checkbox"
-                    checked={selectedQuestionDocs.includes(doc.name)}
-                    onChange={() =>
-                      toggleItem(
-                        doc.name,
-                        selectedQuestionDocs,
-                        setSelectedQuestionDocs
-                      )
-                    }
-                  />
-                  {doc.name}
-                </label>
-              ))}
-            </div>
-
-            <button
-              className="primary-button"
-              onClick={handleAsk}
-              disabled={asking}
-            >
-              {asking ? "Analyzing evidence..." : "Ask Gemini"}
-              <Send size={16} />
-            </button>
-
-            {askError && <pre role="alert" className="upload-error">{askError}</pre>}
-
-            {answer && (
-              <div className="ai-answer">
-                <h3>
-                  <SparklesIcon size={18} /> AI response
-                </h3>
-                <pre className="response-text">{answer}</pre>
-                <p className="muted">
-                  Verify the answer against the original documents.
-                  This is not legal advice.
-                </p>
+<section className="conversation-shell" aria-label="Gemini conversation">
+              <div className="conversation-header">
+                <div>
+                  <div className="eyebrow">YOUR AI ASSISTANT</div>
+                  <h3>Conversation</h3>
+                  <p>Ask follow-up questions about your evidence or general compliance topics.</p>
+                </div>
+                <span className="conversation-status"><span /> Gemini</span>
               </div>
-            )}
+
+              <div className="session-conversation-history" aria-live="polite">
+                {sessionHistory.filter((item) => item.kind === "qa").length === 0 && !asking ? (
+                  <div className="conversation-empty">
+                    <span className="conversation-empty-icon"><SparklesIcon size={22} /></span>
+                    <strong>Your conversation starts here</strong>
+                    <p>Ask a question to get a clear answer, with evidence when documents are selected.</p>
+                  </div>
+                ) : (
+                  sessionHistory
+                    .filter((item) => item.kind === "qa")
+                    .map((item, index) => (
+                      <div className="chat-exchange" key={item.id ?? `${item.created_at ?? "qa"}-${index}`}>
+                        <div className="chat-message user-message">
+                          <span className="chat-avatar user-avatar">You</span>
+                          <div className="chat-bubble user-bubble">
+                            <p>{item.payload?.question || "(Question unavailable)"}</p>
+                          </div>
+                        </div>
+                        <div className="chat-message assistant-message">
+                          <span className="chat-avatar assistant-avatar"><SparklesIcon size={16} /></span>
+                          <div className="assistant-content">
+                            <div className="assistant-heading">
+                              <strong>Gemini</strong>
+                              <span>AI response</span>
+                            </div>
+                            <div className="chat-bubble assistant-bubble">
+                              <FormattedResponse text={item.payload?.answer || "No response was saved for this question."} />
+                              {Array.isArray(item.payload?.document_names) && item.payload.document_names.length > 0 && (
+                                <div className="evidence-chips">
+                                  {item.payload.document_names.map((name) => (
+                                    <span className="evidence-chip" key={name}><FileSearch size={13} /> {name}</span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                )}
+
+                {asking && (
+                  <div className="chat-message assistant-message typing-row" role="status">
+                    <span className="chat-avatar assistant-avatar"><SparklesIcon size={16} /></span>
+                    <div className="chat-bubble assistant-bubble typing-indicator">
+                      <span /><span /><span />
+                      <span className="typing-label">Gemini is thinking…</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="chat-composer">
+                <div className="chat-composer-documents">
+                  <details className="chat-evidence-picker">
+                    <summary>
+                      <FileSearch size={15} />
+                      <span>Select evidence</span>
+                      <span className="selected-doc-count">
+                        {selectedQuestionDocs.filter((name) => readableDocuments.some((doc) => doc.name === name)).length} selected
+                      </span>
+                    </summary>
+                    <div className="chat-evidence-options">
+                      {readableDocuments.length === 0 ? (
+                        <p className="muted">No readable documents yet. You can still ask general questions.</p>
+                      ) : (
+                        readableDocuments.map((doc) => (
+                          <label key={doc.name} className="selection-item">
+                            <input
+                              type="checkbox"
+                              checked={selectedQuestionDocs.includes(doc.name)}
+                              onChange={() => toggleItem(doc.name, selectedQuestionDocs, setSelectedQuestionDocs)}
+                            />
+                            {doc.name}
+                          </label>
+                        ))
+                      )}
+                    </div>
+                  </details>
+                </div>
+
+                <div className="chat-input-row">
+                  <label className="visually-hidden" htmlFor="evidence-question">Message Gemini</label>
+                  <textarea
+                    id="evidence-question"
+                    value={question}
+                    onChange={(event) => setQuestion(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && !event.shiftKey) {
+                        event.preventDefault();
+                        if (!asking && activeSessionId && question.trim()) handleAsk();
+                      }
+                    }}
+                    placeholder="Message Gemini… (Enter to send, Shift+Enter for a new line)"
+                    rows={2}
+                    disabled={asking || !activeSessionId}
+                  />
+                  <button
+                    className="chat-send-button"
+                    type="button"
+                    onClick={handleAsk}
+                    disabled={asking || !activeSessionId || !question.trim()}
+                    aria-label={asking ? "Gemini is responding" : "Send message"}
+                    title="Send message"
+                  >
+                    {asking ? <RefreshCw size={18} className="spin-icon" /> : <Send size={18} />}
+                  </button>
+                </div>
+                {askError && <pre role="alert" className="upload-error chat-error">{askError}</pre>}
+                <p className="conversation-disclaimer">AI can make mistakes. Verify document-based claims against the original evidence. Not legal advice.</p>
+              </div>
+            </section>
 
             <div className="divider-space" />
 
@@ -806,10 +1008,11 @@ function Dashboard({ onBack }) {
               <ShieldCheck className="panel-icon" />
             </div>
 
-            {!review ? (
+            
+            {sessionHistory.filter((item) => item.kind === "review").length === 0 && !review ? (
               <>
                 <p className="muted">
-                  No review has been generated in this browser session yet.
+                  No review has been generated in this session yet.
                 </p>
                 <button
                   className="primary-button"
@@ -820,17 +1023,39 @@ function Dashboard({ onBack }) {
               </>
             ) : (
               <>
-                <pre className="response-text">{review}</pre>
-                <div className="notice">
-                  <ShieldCheck size={18} />
-                  Preliminary AI findings. A human reviewer must verify
-                  evidence and recommendations.
-                </div>
+                {sessionHistory
+                  .filter((item) => item.kind === "review")
+                  .map((item) => (
+                    <div className="ai-answer" key={item.id}>
+                      <p className="muted">
+                        {item.created_at
+                          ? new Date(item.created_at).toLocaleString()
+                          : ""}
+                      </p>
+                      <pre className="response-text">
+                        {item.payload?.review}
+                      </pre>
+                      <div className="notice">
+                        <ShieldCheck size={18} />
+                        Preliminary AI findings require human verification.
+                      </div>
+                    </div>
+                  ))}
+
+                {review && sessionHistory.filter((item) => item.kind === "review").length === 0 && (
+                  <>
+                    <pre className="response-text">{review}</pre>
+                    <div className="notice">
+                      <ShieldCheck size={18} />
+                      Preliminary AI findings require human verification.
+                    </div>
+                  </>
+                )}
               </>
             )}
+
           </section>
         )}
-
         <section className="panel report-panel">
           <div>
             <div className="eyebrow">EXPORT</div>
@@ -972,7 +1197,9 @@ export default function App() {
           <div className="visual-ring ring-a" />
           <div className="visual-ring ring-b" />
           <div className="visual-ring ring-c" />
-          <Scene />
+          <Suspense fallback={<div className="scene-loading" />}>
+           <Scene />
+          </Suspense>
           <div className="floating-tag tag-top">
             <span className="tag-pulse" />
             AI EVIDENCE ENGINE

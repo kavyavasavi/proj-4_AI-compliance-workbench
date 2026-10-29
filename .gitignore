@@ -1,4 +1,18 @@
+# Secrets
 .env
-.venv/
-.venv-1/
+.env.*
+!.env.example
+
+# Local database and uploaded data
+*.db
+*.sqlite
+*.sqlite3
+uploads/
 __pycache__/
+.venv/
+venv/
+node_modules/
+dist/
+
+# Local screenshots
+ScreenShots/
