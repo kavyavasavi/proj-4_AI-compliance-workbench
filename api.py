@@ -21,10 +21,12 @@ from google.genai import types
 
 load_dotenv()
 
-app = FastAPI(title="AI Compliance Workbench API")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "https://proj-4-ai-compliance-workbench.vercel.app",
+    ],
     allow_credentials=False,
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["*"],
