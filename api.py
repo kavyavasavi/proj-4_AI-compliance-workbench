@@ -20,7 +20,7 @@ from google import genai
 from google.genai import types
 
 load_dotenv()
-
+app = FastAPI(title="AI Compliance Workbench API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
